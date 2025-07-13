@@ -1,5 +1,5 @@
-from typing import Annotated
-from fastapi import FastAPI
+from typing import Annotated, Optional
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, validator
 import re
 
@@ -49,29 +49,34 @@ class Author(BaseModel):
         }
     }
 
-class Book(BaseModel):
+class BookDetail(BaseModel):
     author: Author
     isbn: str = Field(
         examples=["978-0-306-40615-7"]
     )
-    
+
     @validator('isbn')
-    def validate_isbn_field(cls, v):
+    def validate_isbn_field(cls, v):  # type: ignore[no-untyped-def]
         return validate_isbn(v)
 
 
+class BookList(BaseModel):
+    books: list[BookDetail]
+
 # In-memory database:
-books: list[Book] = []
+books: list[BookDetail] = []
 
 # Match this endpoint: GET /books/{book_id}
 @app.get("/book/{book_id}")
-def get_book(book_id: int):
+def get_book(book_id: int) -> BookDetail:
+    if book_id >= len(books):
+        raise HTTPException(404, "Book not found")
     return books[book_id]
 
 
 # Match thisd endpoint: GET /books?skip=0&limit=10&author=optional
 @app.get("/books")
-def list_books(skip:int=0, limit:int =10, author: str=None):
+def list_books(skip:int=0, limit:int =10, author: Optional[str]=None) -> BookList:
     result = []
     for book in books[skip : skip + limit]:
         # If author was provided then skip if the book's author does not match
@@ -80,10 +85,14 @@ def list_books(skip:int=0, limit:int =10, author: str=None):
                 continue
 
         result.append(book)
-    return result
 
-# Match this endpoint: POST /books  # with request body
-@app.post("/books")
-def create_book(book: Book):
+    if len(result) == 0:
+        raise HTTPException(404, "Books not found")
+
+    return BookList(books=result)
+
+
+@app.post("/books", status_code=201)
+def create_book(book: BookDetail) -> BookDetail:
     books.append(book)
     return book
